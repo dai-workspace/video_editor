@@ -7,9 +7,15 @@ import numpy as np
 
 
 def analyze_battle_scenes(
-    video_path, frame_skip=50, change_threshold=40, motion_threshold=40
+    video_path,
+    frame_skip=20,
+    brightness_threshold=30,
+    motion_threshold=50,
+    margin=10,
+    scene_time=30,
 ):
     print("戦闘シーンの抽出を開始します")
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print("動画ファイルを開けませんでした")
@@ -17,10 +23,8 @@ def analyze_battle_scenes(
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_idx = 0
-
     prev_gray = None
     timestamps = []
-    diffs = []
 
     while True:
         for _ in range(frame_skip):
@@ -28,7 +32,10 @@ def analyze_battle_scenes(
             if not grabbed:
                 cap.release()
                 print("動画の終端に到達しました")
-                return extract_sections(timestamps)
+                # 終了時に連続区間を抽出して返す処理へ
+                return extract_intervals(
+                    intervals=timestamps, merge_gap=margin, scene_time=scene_time
+                )
 
         ret, frame = cap.retrieve()
         if not ret:
@@ -36,63 +43,50 @@ def analyze_battle_scenes(
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         brightness_std = np.std(gray)
-
         motion_mag = 0
+
         if prev_gray is not None:
             diff = cv2.absdiff(gray, prev_gray)
             motion_mag = np.sum(diff > 25) / diff.size * 100
 
         prev_gray = gray
-        # ----------ここが「動きが大きい時だけ戦闘判定」----------
 
-        if motion_mag > motion_threshold and brightness_std > change_threshold:
+        if motion_mag > motion_threshold and brightness_std > brightness_threshold:
+            # print("motion_mag", motion_mag)
+            # print("brightness_std", brightness_std)
+            print("timestamps", frame_idx / fps)
             timestamps.append(frame_idx / fps)
-            diffs.append(brightness_std)
 
         frame_idx += frame_skip
 
-    cap.release()
-    return extract_sections(timestamps)
 
+def extract_intervals(intervals, merge_gap=10, scene_time=30):
+    intervals = sorted(intervals)
+    clusters = []
+    cluster = [intervals[0]]
 
-def extract_sections(timestamps):
-    print(f"timestamps: {timestamps}")
+    for t in intervals[1:]:
+        if t - cluster[-1] <= 10:
+            cluster.append(t)
+        else:
+            # clusterのサイズが複数なら結果に追加
+            if len(cluster) > 1:
+                clusters.append(cluster)
+            # 1つだけのクラスタは捨てる
+            cluster = [t]
 
-    margin = 10  # 10秒前後の余裕
-    intervals = []
+    # 最後のclusterの処理
+    if len(cluster) > 1:
+        clusters.append(cluster)
 
-    for t in timestamps:
-        start = max(0, t - margin)
-        end = t + margin
-        intervals.append([start, end])
+    highlights = []
+    for cluster in clusters:
+        center = sum(cluster) / len(cluster)
+        start = max(0, center - scene_time)
+        end = center + scene_time
+        highlights.append([start, end])
 
-    # 重複・連続区間をマージする関数
-    def merge_intervals(intervals):
-        if not intervals:
-            return []
-        # 開始時間でソート
-        intervals.sort(key=lambda x: x[0])
-        merged = [intervals]
-
-        for current in intervals[1:]:
-            last = merged[-1]
-            # 重複・連続していればマージ
-            if current[0] <= last[1]:
-                last[1] = max(last[1], current[1])
-            else:
-                merged.append(current)
-        return merged
-
-    merged_sections = merge_intervals(intervals)
-
-    # 2秒以上の区間だけ抽出（安全策）
-    final_sections = [
-        [round(s, 2), round(e, 2)] for s, e in merged_sections if (e - s) > 2
-    ]
-
-    print(f"final_sections: {final_sections}")
-
-    return final_sections
+    return highlights
 
 
 def create_highlight_video(video_path, edit_sections, title=None, subtitles=None):
@@ -120,8 +114,8 @@ if __name__ == "__main__":
     video_file = r"input.mp4"
     sections = analyze_battle_scenes(video_file)
 
-    print(f"sections: {sections}")
+    print("ハイライト区間", sections)
 
     # ハイライト動画の作成
     create_highlight_video(video_file, sections)
-    print("ハイライト動画の作成が完了しました: output.mp4")
+    print("ハイライト動画の作成完了！: output.mp4")
