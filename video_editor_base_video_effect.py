@@ -81,6 +81,8 @@ def extract_intervals(intervals, merge_gap=10, scene_time=30):
 
     highlights = []
     for cluster in clusters:
+        if cluster[-1] - cluster[0] < merge_gap:
+            continue
         center = sum(cluster) / len(cluster)
         start = max(0, center - scene_time)
         end = center + scene_time
