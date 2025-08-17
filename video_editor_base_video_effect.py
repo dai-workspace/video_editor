@@ -28,7 +28,7 @@ def analyze_battle_scenes(
             if not grabbed:
                 cap.release()
                 print("動画の終端に到達しました")
-                return extract_sections(timestamps, diffs, change_threshold)
+                return extract_sections(timestamps)
 
         ret, frame = cap.retrieve()
         if not ret:
